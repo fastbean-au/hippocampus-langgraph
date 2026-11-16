@@ -1,0 +1,137 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  store:
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # The floor declared in pyproject.toml, and whatever is current. A floor nothing installs is
+        # a floor that is wrong: 2.0.17 is the release that added `ttl` to PutOp and `refresh_ttl` to
+        # GetOp and SearchOp, and 2.0.16 imports cleanly and then fails 28 tests with AttributeError.
+        langgraph-checkpoint: ["2.0.17", ""]
+        # The interpreter floor the package declares, and a current one.
+        python: ["3.10", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python }}
+
+      # hippocampus-client is not on any package index. It IS, however, built, correctly
+      # version-stamped and attached to every service release, so the wheel for the version in
+      # SERVICE_VERSION is a real distribution that satisfies the floor in pyproject.toml - and the
+      # store's own dependency resolution is exercised rather than bypassed with --no-deps.
+      - name: Install the client from the pinned service release
+        run: |
+          set -euo pipefail
+
+          version="$(cat SERVICE_VERSION)"
+          wheel="hippocampus_client-${version#v}-py3-none-any.whl"
+
+          python -m pip install --upgrade pip
+          python -m pip install \
+            "https://github.com/fastbean-au/hippocampus/releases/download/${version}/${wheel}"
+
+      - name: Install the store and its test dependencies
+        run: |
+          set -euo pipefail
+
+          python -m pip install pytest pytest-asyncio build "tomli>=2.0; python_version < '3.11'"
+          python -m pip install "langgraph-checkpoint${LANGGRAPH_CHECKPOINT:+==$LANGGRAPH_CHECKPOINT}"
+          python -m pip install -e .
+        env:
+          LANGGRAPH_CHECKPOINT: ${{ matrix.langgraph-checkpoint }}
+
+      - name: Test
+        run: python -m pytest -q
+
+      - name: Build the distributions
+        run: python -m build
+
+      # The failure this package can ship is a wheel that installs and then shadows or misses the
+      # langgraph namespace - langgraph and langgraph.store are implicit namespace packages, and an
+      # __init__.py anywhere above the leaf would replace langgraph itself rather than merging with
+      # it. No test on the source tree can see that, so the wheel is installed beside langgraph
+      # proper and both halves are imported.
+      - name: Install the built wheel into a clean environment and import it
+        run: |
+          set -euo pipefail
+
+          version="$(cat SERVICE_VERSION)"
+          wheel="hippocampus_client-${version#v}-py3-none-any.whl"
+
+          python -m venv /tmp/store-check
+          /tmp/store-check/bin/pip install --quiet langgraph \
+            "https://github.com/fastbean-au/hippocampus/releases/download/${version}/${wheel}"
+          /tmp/store-check/bin/pip install --quiet dist/*.whl
+
+          cd /tmp && /tmp/store-check/bin/python -c \
+            "from langgraph.store.hippocampus import HippocampusStore, __version__; \
+             from langgraph.store.memory import InMemoryStore; \
+             from langgraph.graph import StateGraph; print(__version__)"
+
+  # The same suite against a real service, because the fake is only as right as its reading of the
+  # service: a client-chosen id, ALREADY_EXISTS in a batch result, metadata replaced wholesale on
+  # update, and exact-match metadata filters are all the service's behaviour, not this package's.
+  live:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      # The image for the pinned release rather than a service container, because a `services:`
+      # image cannot read SERVICE_VERSION and the service publishes no floating tag. Its baked-in
+      # config is the SQLite one with no authentication, which is what a throwaway store wants.
+      - name: Start the pinned service
+        run: |
+          set -euo pipefail
+
+          version="$(cat SERVICE_VERSION)"
+
+          docker run --detach --name hippocampus --publish 127.0.0.1:50051:50051 \
+            --publish 127.0.0.1:8080:8080 "ghcr.io/fastbean-au/hippocampus:${version#v}"
+
+          for _ in $(seq 30); do
+            if curl -fsS http://127.0.0.1:8080/readyz >/dev/null; then
+              exit 0
+            fi
+
+            sleep 1
+          done
+
+          docker logs hippocampus
+          exit 1
+
+      - name: Install
+        run: |
+          set -euo pipefail
+
+          version="$(cat SERVICE_VERSION)"
+          wheel="hippocampus_client-${version#v}-py3-none-any.whl"
+
+          python -m pip install --upgrade pip pytest pytest-asyncio
+          python -m pip install \
+            "https://github.com/fastbean-au/hippocampus/releases/download/${version}/${wheel}"
+          python -m pip install -e .
+
+      - name: Test against the service
+        run: python -m pytest -q tests/test_live.py
+        env:
+          HIPPOCAMPUS_ADDRESS: 127.0.0.1:50051

@@ -1,0 +1,77 @@
+# The distribution name follows LangGraph's own convention for a store package -
+# `langgraph-store-<name>`, importable as `langgraph.store.<name>` - so this one installs as
+# `langgraph.store.hippocampus` beside `langgraph.store.memory` and `langgraph.store.postgres`.
+# `langgraph` and `langgraph.store` are implicit namespace packages, which is why neither carries an
+# __init__.py here: adding one would shadow langgraph itself.
+[build-system]
+requires = ["hatchling>=1.21"]
+build-backend = "hatchling.build"
+
+[project]
+name = "langgraph-store-hippocampus"
+dynamic = ["version"]
+description = "A LangGraph long-term memory store backed by Hippocampus, a memory service that forgets what stops mattering."
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+authors = [{ name = "fastbean-au" }]
+keywords = ["hippocampus", "langgraph", "langchain", "memory", "store", "agent", "llm"]
+
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Database :: Front-Ends",
+    "Typing :: Typed",
+]
+
+# The `hippocampus-client` floor is the release whose wheel SERVICE_VERSION first pinned: the client
+# is not on any index, so the only distributions that exist are the wheels attached to service
+# releases, and a lower floor could only ever name one this package was never tested against. It is a
+# floor and not a pin - a newer client is a newer contract, and nothing here reads a field the older
+# one lacked.
+#
+# The langgraph-checkpoint floor is on the distribution that owns `langgraph.store.base` - langgraph
+# itself only depends on it. 2.0.17 is the release that added `ttl` to PutOp and `refresh_ttl` to
+# GetOp and SearchOp, which this store reads on every op; 2.0.16 installs, imports, and then fails
+# 28 of the tests with AttributeError. Found by installing each release, not by reading a changelog,
+# and the CI job installs the floor so it stays true.
+dependencies = [
+    "langgraph-checkpoint>=2.0.17",
+    "hippocampus-client>=0.53",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7",
+    "pytest-asyncio>=0.23",
+    "build>=1.0",
+    "tomli>=2.0; python_version < '3.11'",
+]
+
+[project.urls]
+Homepage = "https://github.com/fastbean-au/hippocampus-langgraph"
+Documentation = "https://github.com/fastbean-au/hippocampus-langgraph#readme"
+Source = "https://github.com/fastbean-au/hippocampus-langgraph"
+Changelog = "https://github.com/fastbean-au/hippocampus-langgraph/releases"
+
+[tool.hatch.version]
+path = "src/langgraph/store/hippocampus/_version.py"
+
+# The package root is the namespace root, not the leaf: hatchling maps `src/langgraph` onto
+# `langgraph`, and the two directories above the leaf stay __init__.py-less so the installed tree
+# merges with langgraph's rather than replacing it.
+[tool.hatch.build.targets.wheel]
+packages = ["src/langgraph"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src", "tests", "README.md", "LICENSE", "pyproject.toml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

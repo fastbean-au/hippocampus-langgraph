@@ -1,0 +1,25 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+.DS_Store
+
+# env file
+.env
+
+# Editor/IDE
+.idea/
+.vscode/
+# Build output.
+dist/
+build/
+*.egg-info/
+.pytest_cache/
+__pycache__/
+
+# Local virtual environments. These sat in the monorepo's root .gitignore (or nowhere, since the
+# adapter was never the thing you stood an environment up in); at a repository root they are.
+.venv/
+venv/

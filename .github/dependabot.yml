@@ -1,0 +1,30 @@
+# Dependabot configuration.
+#
+# THE REASON THIS REPOSITORY EXISTS is the pip block: this store tracks langgraph-checkpoint, which
+# releases on its own cadence and has changed the store's op types before - the TTL fields every op
+# here reads arrived in 2.0.17.
+#
+# hippocampus-client is deliberately NOT tracked here. It is not on any package index, so Dependabot
+# cannot see it; the pin lives in SERVICE_VERSION and is raised by .github/workflows/contract-bump.yaml
+# when the service cuts a release.
+version: 2
+
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      store:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      actions:
+        patterns:
+          - "*"
